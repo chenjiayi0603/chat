@@ -16,6 +16,8 @@ package chat
 
 import (
 	"io"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/openimsdk/chat/internal/api/util"
@@ -48,6 +50,83 @@ type Api struct {
 	chatClient  chatpb.ChatClient
 	adminClient admin.AdminClient
 	imApiCaller imapi.CallerInterface
+}
+
+type loginGuardRecord struct {
+	Count       int
+	FirstFailAt time.Time
+	LockedUntil time.Time
+}
+
+type loginGuard struct {
+	mu      sync.Mutex
+	records map[string]*loginGuardRecord
+}
+
+var apiLoginGuard = &loginGuard{records: make(map[string]*loginGuardRecord)}
+
+const (
+	loginFailWindow = 10 * time.Minute
+	loginFailMax    = 5
+	loginLockTime   = 10 * time.Minute
+)
+
+func loginIdentity(req *chatpb.LoginReq) string {
+	switch {
+	case req.Account != "":
+		return "account:" + req.Account
+	case req.Email != "":
+		return "email:" + req.Email
+	case req.PhoneNumber != "":
+		area := req.AreaCode
+		if area != "" && !strings.HasPrefix(area, "+") {
+			area = "+" + area
+		}
+		return "phone:" + area + ":" + req.PhoneNumber
+	default:
+		return "unknown"
+	}
+}
+
+func (g *loginGuard) allow(key string, now time.Time) (bool, time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	rec, ok := g.records[key]
+	if !ok {
+		return true, time.Time{}
+	}
+	if rec.LockedUntil.After(now) {
+		return false, rec.LockedUntil
+	}
+	if now.Sub(rec.FirstFailAt) > loginFailWindow {
+		delete(g.records, key)
+	}
+	return true, time.Time{}
+}
+
+func (g *loginGuard) markFailure(key string, now time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	rec, ok := g.records[key]
+	if !ok || now.Sub(rec.FirstFailAt) > loginFailWindow {
+		g.records[key] = &loginGuardRecord{
+			Count:       1,
+			FirstFailAt: now,
+		}
+		return
+	}
+	rec.Count++
+	if rec.Count >= loginFailMax {
+		rec.LockedUntil = now.Add(loginLockTime)
+	}
+}
+
+func (g *loginGuard) markSuccess(key string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.records, key)
 }
 
 // ################## ACCOUNT ##################
@@ -168,11 +247,24 @@ func (o *Api) Login(c *gin.Context) {
 		return
 	}
 	req.Ip = ip
+	identity := loginIdentity(req)
+	guardKey := ip + "|" + identity
+	now := time.Now()
+	if ok, lockedUntil := apiLoginGuard.allow(guardKey, now); !ok {
+		log.ZWarn(c, "login blocked by in-memory rate limit", nil, "ip", ip, "identity", identity, "lockedUntil", lockedUntil.Unix())
+		apiresp.GinError(c, errs.ErrNoPermission.WrapMsg("login temporarily locked, try again later"))
+		return
+	}
+	log.ZInfo(c, "login attempt", "ip", ip, "identity", identity)
 	resp, err := o.chatClient.Login(c, req)
 	if err != nil {
+		apiLoginGuard.markFailure(guardKey, now)
+		log.ZWarn(c, "login failed", err, "ip", ip, "identity", identity)
 		apiresp.GinError(c, err)
 		return
 	}
+	apiLoginGuard.markSuccess(guardKey)
+	log.ZInfo(c, "login success", "ip", ip, "identity", identity, "userID", resp.UserID)
 	adminToken, err := o.imApiCaller.ImAdminTokenWithDefaultAdmin(c)
 	if err != nil {
 		apiresp.GinError(c, err)
