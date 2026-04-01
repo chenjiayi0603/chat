@@ -30,8 +30,12 @@ verifyCode:
     smtpPort:
 
 liveKit:
-  url: "ws://127.0.0.1:7880" # LIVEKIT_URL, LiveKit server address and port
-  key: "APIGPW3gnFTzqHH"
-  secret: "23ztfSqsfQ8hKkHzHTl3Z4bvaxro0snjk5jwbp5p6Q3"
+  # 与 openim-api 的 objectAccessBaseURL、MinIO externalAddress 使用同一可达主机（WSL IP 会变时执行 hostname -I 后同步修改）。
+  url: "ws://172.24.177.85:7880" # LIVEKIT_URL，需与 Docker LiveKit 映射端口一致
+  # key: "APIGPW3gnFTzqHH"
+  # secret: "23ztfSqsfQ8hKkHzHTl3Z4bvaxro0snjk5jwbp5p6Q3"
+  # 须与 LiveKit 进程一致：openim-stack.sh 使用官方镜像 `livekit-server --dev`，日志中为 API Key=devkey、API Secret=secret。若改用自定义 livekit.yaml，请同步改 key/secret。
+  key: "devkey"
+  secret: "secret"
 
 allowRegister: true
