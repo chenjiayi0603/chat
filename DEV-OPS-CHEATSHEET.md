@@ -1,8 +1,23 @@
 # openim-chat 开发机日常运维速查
 
-工作目录：
+工作目录示例：
 
-`/home/administrator/interview-quicker/openim/openim-chat`
+- 本仓库常见路径：`/home/administrator/openim/openim-chat`（按你本机实际 `cd` 即可）
+
+## 0. 环境变量与「完整停编启」（改代码后推荐）
+
+在 `openim-chat` 目录下执行：
+
+```bash
+cd /home/administrator/openim/openim-chat
+export OPENIMCONFIG="${OPENIMCONFIG:-$PWD/config}"
+
+mage stop          # 停掉当前 chat 全套进程
+mage build         # 编译全部 cmd 二进制（含 admin-api / admin-rpc 等）
+mage start         # 检查依赖并启动全套 chat 服务
+```
+
+可选：`mage check` 做健康检查。
 
 ## 1. 启动 / 停止 / 重启
 
@@ -22,9 +37,13 @@
 - 官方检查：
   - `mage check`
 - 进程检查：
-  - `ps -ef | rg "chat-api|chat-rpc|admin-api|admin-rpc|bot-api|bot-rpc" | rg -v rg`
+  - 已安装 ripgrep：`ps -ef | rg "chat-api|chat-rpc|admin-api|admin-rpc|bot-api|bot-rpc" | rg -v rg`
+  - **未安装 `rg`（仅 grep）**：`ps -ef | grep -E 'chat-api|chat-rpc|admin-api|admin-rpc|bot-api|bot-rpc' | grep -v grep`
 - 端口检查：
-  - `ss -lntp | rg ":10008|:10009|:10010|:30200|:30300|:30400"`
+  - 已安装 ripgrep：`ss -lntp | rg ":10008|:10009|:10010|:30200|:30300|:30400"`
+  - **未安装 `rg`（仅 grep）**：`ss -lntp | grep -E ':10008|:10009|:10010|:30200|:30300|:30400'`
+- **只确认管理端相关端口**（admin-api / admin-rpc）：
+  - `ss -lntp | grep -E ':10009|:30200'`
 
 ## 3. 日志查看
 
@@ -55,8 +74,8 @@
 1. `mage stop`
 2. `mage start`
 3. `mage check`
-4. `ss -lntp | rg ":10008|:10009|:10010|:30200|:30300|:30400"`
-5. `rg -n "panic|fatal|bind|address already in use|error" _output/logs`
+4. `ss -lntp | grep -E ':10008|:10009|:10010|:30200|:30300|:30400'`（若已装 `rg` 可把 `grep -E '...'` 换成 `rg ":10008|..."`）
+5. 日志扫描：已装 `rg` 用 `rg -n "panic|fatal|bind|address already in use|error" _output/logs`；否则 `grep -nE 'panic|fatal|bind|address already in use|error' _output/logs/*.log`
 
 ## 6. 常见场景建议
 
@@ -92,7 +111,8 @@
   - `ls -lah _output/bin/platforms/linux/amd64`
   - 能看到最终可执行文件，确认“到底编了什么”
 - 看启动到底跑了什么进程：
-  - `ps -ef | rg "_output/bin|chat-api|chat-rpc|admin-api|bot-api" | rg -v rg`
+  - 已装 `rg`：`ps -ef | rg "_output/bin|chat-api|chat-rpc|admin-api|bot-api" | rg -v rg`
+  - 仅 `grep`：`ps -ef | grep -E '_output/bin|chat-api|chat-rpc|admin-api|bot-api' | grep -v grep`
   - 启动命令行会显示 `-c .../config/`，可直接看到配置目录
 - 看默认配置目录：
   - `magefile.go` 里 `customConfigDir = "config"`，`Start()` 默认用项目下 `config/`
@@ -119,7 +139,8 @@
      - 依赖容器（mongo/redis/etcd/kafka/minio/openim-web-front）均为 `Up`
 
 2. 检查 `openim-chat` 全量状态
-   - `cd /home/administrator/interview-quicker/openim/openim-chat`
+   - `cd /home/administrator/openim/openim-chat`（或你的实际路径）
+   - `export OPENIMCONFIG="${OPENIMCONFIG:-$PWD/config}"`（可选，与上面「§0」一致）
    - `mage check`
    - 通过标准：
      - 输出包含 `All services are running normally`

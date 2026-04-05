@@ -16,8 +16,11 @@ package admin
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/openimsdk/tools/errs"
@@ -172,7 +175,48 @@ func (o *adminServer) AdminUpdateInfo(ctx context.Context, req *admin.AdminUpdat
 	return resp, nil
 }
 
+func isMD5HexString(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// adminPasswordEqual compares stored vs client value; 32-char hex MD5 is compared case-insensitively
+// so uppercase hashes from some frontends still match DB (Go stores lowercase hex).
+func adminPasswordEqual(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if isMD5HexString(a) && isMD5HexString(b) {
+		return strings.EqualFold(a, b)
+	}
+	return false
+}
+
+// adminLoginPasswordOK matches stored password against the client-provided value.
+// It supports:
+//   - share.yml init: DB holds hex(md5(account)); client may send that hex or the raw password
+//   - add_admin / API: DB holds plaintext; client may send plaintext or hex(md5(plaintext)) like openim-admin-front
+func adminLoginPasswordOK(stored, fromClient string) bool {
+	direct := adminPasswordEqual(stored, fromClient)
+	sumIn := md5.Sum([]byte(fromClient))
+	md5InMatch := adminPasswordEqual(stored, hex.EncodeToString(sumIn[:]))
+	sumStored := md5.Sum([]byte(stored))
+	md5StoredMatch := adminPasswordEqual(hex.EncodeToString(sumStored[:]), fromClient)
+	ok := direct || md5InMatch || md5StoredMatch
+	return ok
+}
+
 func (o *adminServer) Login(ctx context.Context, req *admin.LoginReq) (*admin.LoginResp, error) {
+	req.Account = strings.TrimSpace(req.Account)
+	req.Password = strings.TrimSpace(req.Password)
 	a, err := o.Database.GetAdmin(ctx, req.Account)
 	if err != nil {
 		if dbutil.IsDBNotFound(err) {
@@ -180,7 +224,7 @@ func (o *adminServer) Login(ctx context.Context, req *admin.LoginReq) (*admin.Lo
 		}
 		return nil, err
 	}
-	if a.Password != req.Password {
+	if !adminLoginPasswordOK(a.Password, req.Password) {
 		return nil, eerrs.ErrPassword.Wrap()
 	}
 	adminToken, err := o.CreateToken(ctx, &admin.CreateTokenReq{UserID: a.UserID, UserType: constant.AdminUser})
