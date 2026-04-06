@@ -15,6 +15,7 @@
 package chat
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -69,6 +70,8 @@ const (
 	loginFailWindow = 10 * time.Minute
 	loginFailMax    = 5
 	loginLockTime   = 10 * time.Minute
+	// errChatAccountNotFound matches pkg/eerrs.ErrAccountNotFound (user not registered in chat).
+	errChatAccountNotFound = 20002
 )
 
 func loginIdentity(req *chatpb.LoginReq) string {
@@ -258,7 +261,12 @@ func (o *Api) Login(c *gin.Context) {
 	log.ZInfo(c, "login attempt", "ip", ip, "identity", identity)
 	resp, err := o.chatClient.Login(c, req)
 	if err != nil {
-		apiLoginGuard.markFailure(guardKey, now)
+		// Do not count "account not registered" toward brute-force lockout (wrong phone / typo).
+		var ce errs.CodeError
+		accountNotFound := errors.As(err, &ce) && ce.Code() == errChatAccountNotFound
+		if !accountNotFound {
+			apiLoginGuard.markFailure(guardKey, now)
+		}
 		log.ZWarn(c, "login failed", err, "ip", ip, "identity", identity)
 		apiresp.GinError(c, err)
 		return

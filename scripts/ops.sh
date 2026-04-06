@@ -10,6 +10,8 @@ DEPS_COMPOSE_FILE="${DEPS_COMPOSE_FILE:-$OPENIM_SERVER_ROOT/docker-compose.yml}"
 
 # ======================== 使用例子（快速复制） ========================
 # 基础运维（openim-chat 自身）
+#   ./scripts/ops.sh build
+#   ./scripts/ops.sh build chat-api chat-rpc
 #   ./scripts/ops.sh start
 #   ./scripts/ops.sh stop
 #   ./scripts/ops.sh restart
@@ -43,6 +45,7 @@ openim-chat 运维脚本
   deps-up                 启动第三方依赖容器（Mongo/Redis/Etcd/Kafka/MinIO/Web）
   deps-down               停止第三方依赖容器
   deps-ps                 查看第三方依赖容器状态
+  build [目标...]         编译 openim-chat（mage build；无参数则构建全部二进制）
   start                   启动 openim-chat 服务（mage start）
   stop                    停止 openim-chat 服务（mage stop）
   restart                 重启 openim-chat 服务（stop + start）
@@ -116,6 +119,23 @@ deps_down() {
 deps_ps() {
   log "第三方依赖容器状态:"
   run_compose ps
+}
+
+# 示例:
+#   ./scripts/ops.sh build
+#   ./scripts/ops.sh build chat-api chat-rpc
+build_server() {
+  need_cmd mage
+  (
+    cd "$ROOT_DIR"
+    if [[ $# -eq 0 ]]; then
+      log "编译 openim-chat（全部二进制）..."
+      mage build
+    else
+      log "编译 openim-chat 指定目标: $*"
+      mage build "$@"
+    fi
+  )
 }
 
 # 示例: ./scripts/ops.sh start
@@ -217,6 +237,10 @@ case "$cmd" in
     ;;
   deps-ps)
     deps_ps
+    ;;
+  build)
+    shift
+    build_server "$@"
     ;;
   start)
     start_server
